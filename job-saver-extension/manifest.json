@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "Job Saver → Google Sheet",
+  "version": "0.3.0",
+  "description": "Save LinkedIn job details to a Google Sheet in one click.",
+  "permissions": ["storage"],
+  "host_permissions": ["https://*.linkedin.com/jobs/*"],
+  "content_scripts": [
+    {
+      "matches": ["https://*.linkedin.com/jobs/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "background": { "service_worker": "service_worker.js" },
+  "options_page": "options.html"
+}
