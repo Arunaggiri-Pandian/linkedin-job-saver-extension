@@ -1,22 +1,18 @@
 // content.js
 (function () {
-  // -------- helpers --------
-  const $ = sel => document.querySelector(sel);
+  const $ = s => document.querySelector(s);
   const text = el => (el ? el.textContent.trim() : '');
 
   function safeSendMessage(msg) {
-    try {
-      if (!chrome?.runtime?.id) return;
-      chrome.runtime.sendMessage(msg, () => void chrome.runtime.lastError);
-    } catch (_) {}
+    try { if (!chrome?.runtime?.id) return; chrome.runtime.sendMessage(msg, () => void chrome.runtime.lastError); } catch {}
   }
 
   // -------- job id + canonical url --------
   function getJobIdFromUrl(url) {
     try {
       const u = new URL(url);
-      const byParam = u.searchParams.get('currentJobId') || u.searchParams.get('trkId') || u.searchParams.get('jk');
-      if (byParam) return byParam;
+      const p = u.searchParams.get('currentJobId') || u.searchParams.get('trkId') || u.searchParams.get('jk');
+      if (p) return p;
       const m = u.pathname.match(/\/jobs\/view\/(\d+)/);
       if (m) return m[1];
     } catch {}
@@ -42,24 +38,28 @@
     return {};
   }
 
-  // -------- robust field scraping --------
+  // -------- robust field selectors --------
   const TITLE_Q = [
+    'h1.job-title',
+    '.job-details-jobs-unified-top-card__job-title',
     'h1[data-test="job-details-title"]',
     'h1.jobs-unified-top-card__job-title',
-    'h1.job-details-jobs-unified-top-card__job-title',
     'h1.top-card-layout__title'
   ].join(', ');
 
   const COMPANY_Q = [
+    'div.job-details-jobs-unified-top-card__primary-description-container a',
     'a[data-test="job-details-company-name"]',
-    'a[data-test="job-details-company"]',
     'a.jobs-unified-top-card__company-name',
     'a.job-details-jobs-unified-top-card__company-name',
+    'a[data-test="job-details-company"]',   // <-- fixed (was a.data-test="...")
     'a.topcard__org-name-link',
     '.top-card-layout__second-subline a'
   ].join(', ');
 
   const LOCATION_Q = [
+    'span.job-location',
+    'div.job-details-jobs-unified-top-card__primary-description-container > div > span:first-child',
     '[data-test="job-details-location"]',
     '[data-test-job-location]',
     '.jobs-unified-top-card__bullet',
@@ -76,20 +76,37 @@
     return '';
   }
 
-  // salary: scan only the top card / header areas to avoid random numbers
+  // Clean noisy location like "San Jose, CA · Reposted 2 weeks ago · ..."
+  function cleanLocation(s) {
+    if (!s) return '';
+    const blacklist = /(reposted|posted|ago|people|applicant|apply|promoted|responses|managed|hiring|click|viewed)/i;
+    const parts = s.split(/[\u00B7•|]/g).map(p => p.trim()).filter(Boolean);
+    for (const p of parts) {
+      if (blacklist.test(p)) continue;
+      if (/[A-Za-z]/.test(p)) return p.replace(/\s{2,}/g, ' ');
+    }
+    return s.trim();
+  }
+
+  // salary: search only in top-card/details containers to avoid random numbers
   function findSalary() {
     const containers = document.querySelectorAll(
       '.jobs-unified-top-card, .job-details-jobs-unified-top-card, .top-card-layout, [data-test="job-details"]'
     );
-    const rxRange = /([$€£]\s?\d[\d,]*(?:\.\d+)?\s*(?:-|–|to)\s*[$€£]?\s?\d[\d,]*(?:\.\d+)?\s*(?:\/?(?:hr|hour|year|yr|mo|month|day)|\s+(?:per|a)\s+(?:hour|year|month|day)))/i;
+    const rxRange  = /([$€£]\s?\d[\d,]*(?:\.\d+)?\s*(?:-|–|to)\s*[$€£]?\s?\d[\d,]*(?:\.\d+)?\s*(?:\/?(?:hr|hour|year|yr|mo|month|day)|\s+(?:per|a)\s+(?:hour|year|month|day)))/i;
     const rxSingle = /([$€£]\s?\d[\d,]*(?:\.\d+)?\s*(?:\/?(?:hr|hour|year|yr|mo|month|day)|\s+(?:per|a)\s+(?:hour|year|month|day)))/i;
 
     for (const c of containers) {
+      if (c.querySelector('i[aria-label*="salary" i], i[data-test-icon*="salary" i]')) {
+        const t = c.innerText || '';
+        const m1 = t.match(rxRange);  if (m1) return m1[1];
+        const m2 = t.match(rxSingle); if (m2) return m2[1];
+      }
+    }
+    for (const c of containers) {
       const t = c.innerText || '';
-      const m1 = t.match(rxRange);
-      if (m1) return m1[1];
-      const m2 = t.match(rxSingle);
-      if (m2) return m2[1];
+      const m1 = t.match(rxRange);  if (m1) return m1[1];
+      const m2 = t.match(rxSingle); if (m2) return m2[1];
     }
     return '';
   }
@@ -101,7 +118,7 @@
 
     data.job_title = text($(TITLE_Q));
     data.company   = text($(COMPANY_Q));
-    data.location  = text($(LOCATION_Q));
+    data.location  = cleanLocation(text($(LOCATION_Q)));
     data.workplace_type = normalizeWorkplace();
 
     // JSON-LD fallback
@@ -110,13 +127,12 @@
     if (!data.company && ld.company)     data.company   = ld.company;
     if (!data.location && ld.location)   data.location  = ld.location;
 
-    // title/company from og:title or document.title ("Title - Company | LinkedIn")
+    // fallback from og:title / document.title ("Title - Company | LinkedIn"), ignore "(1) LinkedIn"
     const t1 = document.querySelector('meta[property="og:title"]')?.content || '';
     const t2 = document.title || '';
-    const source = t1 || t2;
-    if (source) {
-      const cleaned = source.replace(/\s*\|\s*LinkedIn\s*$/i, '');
-      const parts = cleaned.split(' - ');
+    const source = (t1 || t2).replace(/\s*\|\s*LinkedIn\s*$/i, '').trim();
+    if (source && !/^\(?\d+\)?\s*LinkedIn$/i.test(source) && !/^LinkedIn$/i.test(source)) {
+      const parts = source.split(' - ');
       if (!data.job_title && parts[0]) data.job_title = parts[0].trim();
       if (!data.company && parts[1])   data.company   = parts[1].trim();
     }
@@ -129,16 +145,24 @@
     data.salary_text = findSalary();
     data.date_posted = (document.querySelector('[data-test-posted-date]')?.getAttribute('datetime') || '').trim();
 
-    data.saved_at = new Date().toISOString();
-    // status will be set from the user's choice
+    const { date, time } = getFormattedDateTime();
+    data.saved_date = date;
+    data.saved_time = time;
+    
     return data;
   }
 
-  // -------- two-choice flow (save only after choice) --------
-  function showChoicePopup(onPick) {
-    // remove if already showing
-    document.getElementById('job-saver-choice')?.remove();
+  // -------- date/time formatting --------
+  function getFormattedDateTime() {
+    const now = new Date();
+    const date = now.toLocaleDateString('en-CA'); // YYYY-MM-DD
+    const time = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+    return { date, time };
+  }
 
+  // -------- two-choice flow (choose → then save once) --------
+  function showChoicePopup(onPick) {
+    document.getElementById('job-saver-choice')?.remove();
     const box = document.createElement('div');
     box.id = 'job-saver-choice';
     Object.assign(box.style, {
@@ -167,14 +191,11 @@
     box.appendChild(applyBtn);
     box.appendChild(laterBtn);
     document.body.appendChild(box);
-
-    // auto-dismiss in case user ignores it
     setTimeout(() => box.remove(), 8000);
   }
 
-  // -------- button lifecycle (SPA-proof) --------
+  // button lifecycle (SPA-safe)
   let clickCooldown = false;
-
   function createButton() {
     document.getElementById('job-saver-save-btn')?.remove();
     document.getElementById('job-saver-choice')?.remove();
@@ -192,17 +213,14 @@
     btn.addEventListener('click', () => {
       if (clickCooldown) return;
       clickCooldown = true;
-
-      // do NOT save yet—ask the user first
       showChoicePopup((statusChoice) => {
         const payload = scrape();
         if (!payload.job_id) {
           btn.textContent = 'No job id';
           setTimeout(() => (btn.textContent = 'Save to Sheet'), 900);
-          clickCooldown = false;
-          return;
+          clickCooldown = false; return;
         }
-        payload.status = statusChoice;     // 'applied' or 'Saved to Apply Later'
+        payload.status = statusChoice;
         safeSendMessage({ type: 'SAVE_JOB', payload });
         btn.textContent = 'Saved!';
         setTimeout(() => { btn.textContent = 'Save to Sheet'; clickCooldown = false; }, 900);

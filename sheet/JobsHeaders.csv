@@ -1,1 +1,1 @@
-saved_at,job_id,job_title,company,job_url,location,workplace_type,date_posted,application_method,salary_text,status,notes
+saved_date,saved_time,job_id,job_title,company,job_url,location,workplace_type,date_posted,application_method,salary_text,status,notes
