@@ -1,5 +1,11 @@
 # LinkedIn Job Saver
 
+## Why was this created?
+
+The job hunt can be a chaotic process. You apply to countless jobs, and then, weeks later, you get a call for an interview. The problem? You have no idea what the job is. You scramble to find the original job posting, but it's often too late. This extension was built to solve that problem.
+
+It's also for those moments when you're scrolling through LinkedIn during a class, on your commute, or just browsing, and you come across an interesting role. You click "Save for later," but it gets lost in the abyss of your saved posts. By saving the job to a Google Sheet, you create a personal, organized, and persistent record of your job search, ensuring you never miss an opportunity.
+
 This project is a Chrome extension that allows you to save job postings from LinkedIn to a Google Sheet.
 
 ## Features
